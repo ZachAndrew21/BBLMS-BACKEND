@@ -38,6 +38,16 @@ app.use('/api/dashboard', require('./src/routes/dashboard'));
 app.use('/api/reports', require('./src/routes/reports'));
 app.use('/api/incidents', require('./src/routes/incidents'));
 
+// Root route
+app.get('/', (req, res) => {
+  res.json({
+    status: 'online',
+    message: 'BISU-Bilar Library Management System API is running',
+    healthCheck: '/api/health',
+    stats: '/api/stats',
+  });
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'BISU-Bilar Library Management System API' });
