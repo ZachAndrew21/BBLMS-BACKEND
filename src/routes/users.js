@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const { getDb } = require('../database/init');
 const { authMiddleware, adminMiddleware } = require('../middleware/auth');
 const { sendApprovalEmail } = require('../utils/mailer');
+const { checkFieldLengths, FIELD_LIMITS } = require('../utils/fieldLimits');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -184,7 +185,7 @@ router.post('/borrow', async (req, res) => {
       // Create borrower record for this user
       const [createResult] = await pool.query(
         'CALL sp_create_borrower(?,?,?,?,?,?,?,?,?,?)',
-        [user.user_id, user.username, '', null, null, null, null, null, 'STAFF', 'ACTIVE']
+        [user.user_id, String(user.username || '').slice(0, FIELD_LIMITS.firstname.max), '', null, null, null, null, null, 'STAFF', 'ACTIVE']
       );
       borrowerId = createResult[0][0].id;
     } else {
@@ -263,6 +264,8 @@ router.post('/', async (req, res) => {
     if (!user_id || !username || !password) {
       return res.status(400).json({ error: 'User ID, username, and password are required' });
     }
+    const lengthError = checkFieldLengths({ user_id, username, designation, access_right });
+    if (lengthError) return res.status(400).json({ error: lengthError });
     const hashedPassword = bcrypt.hashSync(password, 10);
     const [result] = await pool.query(
       `INSERT INTO users (user_id, username, password, designation, access_right, is_admin, status)
@@ -303,6 +306,8 @@ router.put('/:id', async (req, res) => {
   try {
     const pool = getDb();
     const { username, password, designation, access_right, is_admin } = req.body;
+    const lengthError = checkFieldLengths({ username, designation, access_right });
+    if (lengthError) return res.status(400).json({ error: lengthError });
     const hashedPassword = password ? bcrypt.hashSync(password, 10) : null;
     const [existingRows] = await pool.query('SELECT * FROM users WHERE id = ? LIMIT 1', [req.params.id]);
     const existingUser = existingRows[0];

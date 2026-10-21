@@ -1,6 +1,7 @@
 const express = require('express');
 const { getDb } = require('../database/init');
 const { authMiddleware } = require('../middleware/auth');
+const { checkFieldLengths } = require('../utils/fieldLimits');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -53,6 +54,8 @@ router.post('/', async (req, res) => {
     if (!id_no || !firstname || !lastname) {
       return res.status(400).json({ error: 'ID No, Firstname, and Lastname are required' });
     }
+    const lengthError = checkFieldLengths({ id_no, firstname, lastname, mobile_phone, phone, email, address });
+    if (lengthError) return res.status(400).json({ error: lengthError });
     const [results] = await pool.query('CALL sp_create_borrower(?,?,?,?,?,?,?,?,?,?)', [
       id_no, firstname, lastname,
       mobile_phone || null, phone || null, email || null,
@@ -72,6 +75,8 @@ router.put('/:id', async (req, res) => {
   try {
     const pool = getDb();
     const { id_no, firstname, lastname, mobile_phone, phone, email, address, notes, type, status } = req.body;
+    const lengthError = checkFieldLengths({ id_no, firstname, lastname, mobile_phone, phone, email, address });
+    if (lengthError) return res.status(400).json({ error: lengthError });
     const [results] = await pool.query('CALL sp_update_borrower(?,?,?,?,?,?,?,?,?,?,?)', [
       req.params.id,
       id_no || null, firstname || null, lastname || null,

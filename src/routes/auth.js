@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { getDb } = require('../database/init');
+const { checkFieldLengths } = require('../utils/fieldLimits');
 
 const router = express.Router();
 
@@ -115,8 +116,15 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ error: 'ID No, Firstname, and Lastname are required.' });
     }
 
-    const hashedPassword = bcrypt.hashSync('bisu123', 10);
     const username = `${firstname} ${lastname}`.trim();
+    const lengthError = checkFieldLengths({
+      id_no, firstname, middle_name, lastname, mobile_phone, email, address, username,
+    });
+    if (lengthError) {
+      return res.status(400).json({ error: lengthError });
+    }
+
+    const hashedPassword = bcrypt.hashSync('bisu123', 10);
     const borrowerType = normalizeBorrowerType(type);
     const conn = await pool.getConnection();
 
@@ -369,6 +377,16 @@ router.patch('/me', async (req, res) => {
       const address = String(borrowerInput.address ?? '').trim();
       const notes = borrowerInput.notes !== undefined ? String(borrowerInput.notes || '').trim() : null;
       const type = normalizeBorrowerType(borrowerInput.type ?? 'Student');
+
+      const lengthError = checkFieldLengths({
+        username: nextUsername, designation: nextDesignation,
+        firstname, middle_name, lastname, mobile_phone: mobilePhone, phone, email, address,
+      });
+      if (lengthError) {
+        await conn.rollback();
+        conn.release();
+        return res.status(400).json({ error: lengthError });
+      }
 
       const [existingBorrower] = await conn.query('SELECT id FROM borrowers WHERE id_no = ?', [currentUser.user_id]);
       if (existingBorrower.length > 0) {
