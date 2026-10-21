@@ -225,6 +225,22 @@ router.post('/checkout', async (req, res) => {
     if (!book_id || !borrower_id || !due_date) {
       return res.status(400).json({ error: 'Book, borrower, and due date are required' });
     }
+
+    // Maximum 3 books borrowing limit per borrower
+    const maxBorrowLimit = Number(process.env.MAX_BORROW_LIMIT || 3);
+    const [loanCountRows] = await pool.query(
+      `SELECT COUNT(*) AS active_count
+       FROM transactions
+       WHERE borrower_id = ? AND status IN ('Loaned', 'Overdue')`,
+      [borrower_id]
+    );
+    const activeCount = loanCountRows[0]?.active_count || 0;
+    if (activeCount >= maxBorrowLimit) {
+      return res.status(400).json({
+        error: `Borrower has reached the maximum borrowing limit of ${maxBorrowLimit} books. Please return a book before borrowing again.`,
+      });
+    }
+
     const [results] = await pool.query('CALL sp_checkout_book(?,?,?,?,?)', [
       book_id, borrower_id, loan_date || null, due_date, notes || null,
     ]);

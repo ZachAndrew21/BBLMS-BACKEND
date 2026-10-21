@@ -300,6 +300,8 @@ BEGIN
     DECLARE v_copies INT DEFAULT 0;
     DECLARE v_book_exists INT DEFAULT 0;
     DECLARE v_borrower_exists INT DEFAULT 0;
+    DECLARE v_overdue_count INT DEFAULT 0;
+    DECLARE v_active_loans INT DEFAULT 0;
     DECLARE v_new_id INT;
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
@@ -322,6 +324,25 @@ BEGIN
     SELECT COUNT(*) INTO v_borrower_exists FROM `borrowers` WHERE `id` = p_borrower_id;
     IF v_borrower_exists = 0 THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Borrower not found';
+    END IF;
+    -- Check for overdue books
+    SELECT COUNT(*) INTO v_overdue_count
+      FROM `transactions`
+      WHERE `borrower_id` = p_borrower_id
+        AND `status` IN ('Loaned', 'Overdue')
+        AND `due_date` < CURDATE();
+    IF v_overdue_count > 0 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'This borrower has overdue book(s). All overdue books must be returned before borrowing again.';
+    END IF;
+    -- Check maximum 3 books limit
+    SELECT COUNT(*) INTO v_active_loans
+      FROM `transactions`
+      WHERE `borrower_id` = p_borrower_id
+        AND `status` IN ('Loaned', 'Overdue');
+    IF v_active_loans >= 3 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Borrower has reached the maximum borrowing limit of 3 books. Please return a book before borrowing again.';
     END IF;
     -- Create the transaction
     INSERT INTO `transactions` (`book_id`, `borrower_id`, `loan_date`, `due_date`, `notes`, `status`)

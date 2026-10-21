@@ -196,6 +196,98 @@ async function initializeDatabase() {
         // Ignored
       }
     }
+
+    // ── Migration: ensure sp_checkout_book enforces maximum 3 books limit ───────
+    try {
+      await pool.query('DROP PROCEDURE IF EXISTS sp_checkout_book');
+      await pool.query(`
+        CREATE PROCEDURE sp_checkout_book(
+            IN p_book_id     INT,
+            IN p_borrower_id INT,
+            IN p_loan_date   DATE,
+            IN p_due_date    DATE,
+            IN p_notes       TEXT
+        )
+        BEGIN
+            DECLARE v_copies        INT DEFAULT 0;
+            DECLARE v_book_exists   INT DEFAULT 0;
+            DECLARE v_borrower_exists INT DEFAULT 0;
+            DECLARE v_overdue_count INT DEFAULT 0;
+            DECLARE v_active_loans  INT DEFAULT 0;
+            DECLARE v_new_id        INT;
+            DECLARE EXIT HANDLER FOR SQLEXCEPTION
+            BEGIN
+                ROLLBACK;
+                RESIGNAL;
+            END;
+            START TRANSACTION;
+            -- Validate book exists and has copies
+            SELECT COUNT(*), IFNULL(MAX(copies_available), 0)
+              INTO v_book_exists, v_copies
+              FROM books
+              WHERE id = p_book_id;
+            IF v_book_exists = 0 THEN
+                SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Book not found';
+            END IF;
+            IF v_copies <= 0 THEN
+                SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'No copies available';
+            END IF;
+            -- Validate borrower exists
+            SELECT COUNT(*) INTO v_borrower_exists FROM borrowers WHERE id = p_borrower_id;
+            IF v_borrower_exists = 0 THEN
+                SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Borrower not found';
+            END IF;
+            -- Check for overdue books
+            SELECT COUNT(*) INTO v_overdue_count
+              FROM transactions
+              WHERE borrower_id = p_borrower_id
+                AND status IN ('Loaned', 'Overdue')
+                AND due_date < CURDATE();
+            IF v_overdue_count > 0 THEN
+                SIGNAL SQLSTATE '45000'
+                    SET MESSAGE_TEXT = 'This borrower has overdue book(s). All overdue books must be returned before borrowing again.';
+            END IF;
+            -- Check maximum 3 books limit
+            SELECT COUNT(*) INTO v_active_loans
+              FROM transactions
+              WHERE borrower_id = p_borrower_id
+                AND status IN ('Loaned', 'Overdue');
+            IF v_active_loans >= 3 THEN
+                SIGNAL SQLSTATE '45000'
+                    SET MESSAGE_TEXT = 'Borrower has reached the maximum borrowing limit of 3 books. Please return a book before borrowing again.';
+            END IF;
+            -- Create the transaction
+            INSERT INTO transactions (book_id, borrower_id, loan_date, due_date, notes, status)
+            VALUES (
+                p_book_id,
+                p_borrower_id,
+                IFNULL(p_loan_date, CURDATE()),
+                p_due_date,
+                IFNULL(p_notes, ''),
+                'Loaned'
+            );
+            SET v_new_id = LAST_INSERT_ID();
+            -- Decrement available copies
+            UPDATE books
+            SET copies_available = copies_available - 1
+            WHERE id = p_book_id;
+            -- Return the created transaction with joined data
+            SELECT
+                t.*,
+                b.title   AS book_title,
+                b.barcode AS book_barcode,
+                CONCAT(br.firstname, ' ', br.lastname) AS borrower_name
+            FROM transactions t
+            INNER JOIN books b      ON t.book_id     = b.id
+            INNER JOIN borrowers br ON t.borrower_id = br.id
+            WHERE t.id = v_new_id;
+            COMMIT;
+        END
+      `);
+      console.log('Migrated sp_checkout_book procedure (enforcing 3 books maximum limit)');
+    } catch (procErr) {
+      console.warn('Note: sp_checkout_book procedure migration skipped or handled by app:', procErr.message);
+    }
   } catch (err) {
     console.error('MySQL connection failed:', err.message);
     process.exit(1);

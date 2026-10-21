@@ -131,6 +131,21 @@ router.post('/borrow', async (req, res) => {
       borrowerId = borrowerResult[0].id;
     }
 
+    // Check maximum 3 books borrowing limit
+    const maxBorrowLimit = Number(process.env.MAX_BORROW_LIMIT || 3);
+    const [loanCountRows] = await pool.query(
+      `SELECT COUNT(*) AS active_count
+       FROM transactions
+       WHERE borrower_id = ? AND status IN ('Loaned', 'Overdue')`,
+      [borrowerId]
+    );
+    const activeCount = loanCountRows[0]?.active_count || 0;
+    if (activeCount >= maxBorrowLimit) {
+      return res.status(400).json({
+        error: `You have reached the maximum borrowing limit of ${maxBorrowLimit} books. Please return a book before borrowing again.`,
+      });
+    }
+
     // Process checkout
     const [results] = await pool.query('CALL sp_checkout_book(?,?,?,?,?)', [
       book_id, borrowerId, null, due_date, `Self-checkout by ${user.username}`
