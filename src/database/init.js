@@ -43,6 +43,24 @@ async function initializeDatabase() {
       console.log('Migrated users.status column for account approval workflow');
     }
 
+    // ── Migration: ensure users.password is VARCHAR(255) to prevent bcrypt hash truncation ──
+    try {
+      const [pwdCol] = await pool.query(
+        `SELECT CHARACTER_MAXIMUM_LENGTH
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ?
+           AND TABLE_NAME   = 'users'
+           AND COLUMN_NAME  = 'password'`,
+        [process.env.DB_NAME]
+      );
+      if (pwdCol[0] && pwdCol[0].CHARACTER_MAXIMUM_LENGTH < 255) {
+        await pool.query(`ALTER TABLE users MODIFY COLUMN password VARCHAR(255) NOT NULL`);
+        console.log('Migrated users.password column to VARCHAR(255)');
+      }
+    } catch (e) {
+      console.warn('Note: users.password migration skipped:', e.message);
+    }
+
     // ── Migration: fine_paid flag on transactions ──────────────────────────────
     const [finePaidCol] = await pool.query(
       `SELECT COUNT(*) AS column_count
